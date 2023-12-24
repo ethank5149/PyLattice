@@ -6,6 +6,7 @@ from matplotlib import pyplot as plt
 from matplotlib.gridspec import GridSpec
 import matplotlib.animation as animation
 from scipy.integrate import solve_ivp
+from scipy.stats import linregress
 from functools import partial
 import dill
 from tqdm import trange
@@ -41,22 +42,15 @@ DEFAULT_ICS = np.asarray([
     -RAND_PARAMS['v'] / np.sqrt(2), -RAND_PARAMS['v'], -RAND_PARAMS['v'] / np.sqrt(2),
     ])
 
-def progress_bar (
-        frame,                         # (Required): current frame (Int)
-        total,                         # (Required): total frames (Int)
-        prefix = 'Saving animation',  # (Optional): prefix string (Str)
-        suffix = '',                   # (Optional): suffix string (Str)
-        decimals = 1,                  # (Optional): positive number of decimals in percent complete (Int)        
-        length = 100,                  # (Optional): character length of bar (Int)
-        fill = '█',                    # (Optional): bar fill character (Str)
-        printEnd = "\r"                # (Optional): end character (e.g. "\r", "\r\n") (Str)
-        ):
+
+def progress_bar(frame, total):
     iteration = frame + 1
-    percent = ("{0:." + str(decimals) + "f}").format(100 * (iteration / float(total)))  # f"{100 * (iteration / float(total)):.1f}"
-    filledLength = int(length * iteration // total)
-    bar = fill * filledLength + '-' * (length - filledLength)
-    print(f'\r{prefix} |{bar}| {percent}% {suffix}', end = printEnd)
-    if iteration == total:
+    percent = f"{100 * (iteration / float(total)):.1f}"
+    filled_length = int(100 * iteration // total)
+    progress = '█' * filled_length + '-' * (100 - filled_length)
+    print(f'\rSaving Animation: |{progress}| {percent}% ', end="\r")
+    # if iteration == total:
+    if frame == total:
         print()
 
 def gen_rand_ics(
@@ -82,6 +76,8 @@ def gen_rand_ics(
                               0, rand_v[4] * np.sin(theta),                       0,
         -rand_v[6] / np.sqrt(2),                -rand_v[7], -rand_v[8] / np.sqrt(2),
     ])
+
+DEFAULT_ICS = gen_rand_ics()
 
 def solve_symbolic(
         verbose=True
@@ -202,15 +198,20 @@ def simulate(
     frames = tf * fps
     dt = tf / frames
     t_eval = np.linspace(0, tf, frames)
-    
+
+    ##
+    energy_loss_fit = linregress(t_eval, energy_loss_percent)
+    energy_loss_fit_plot = energy_loss_fit.slope * t_eval + energy_loss_fit.intercept
+    ##
+
     fig = plt.figure(layout="constrained", figsize=(19.2, 10.80))
+    fig.suptitle('PyLattice-N9\nWritten by: Ethan Knox')
     gs = GridSpec(2, 2, figure=fig)
     ax3 = fig.add_subplot(gs[1, 1])
     ax2 = fig.add_subplot(gs[0, 1], sharex=ax3)
     plt.setp(ax2.get_xticklabels(), visible=False)  # Replicate subplots sharex
     ax1 = fig.add_subplot(gs[:, 0])
 
-    fig.suptitle('PyLattice-N9\nWritten by: Ethan Knox')
     min_x, max_x = np.min(x), np.max(x)
     min_y, max_y = np.min(y), np.max(y)
     ax1.set_xlim((1.15 * min_x, 1.15 * max_x))
@@ -219,21 +220,24 @@ def simulate(
     ax1.set_aspect('equal')
     ax1.set_xlabel(r'X [m]')
     ax1.set_ylabel(r'Y [m]')
-
     ax2.set_ylabel(r'Energy Loss [%]')
     ax3.set_xlabel(r'$t$ $[s]$')
     ax3.set_ylabel(r'Energy $[E]/[E_0]$')
 
-    ax2.plot(t_eval, energy_loss_percent, '-', lw=1.5, color='purple')
-    ax3.plot(t_eval, kinetic_unitless, '-', lw=1.5, color='red')
-    ax3.plot(t_eval, potential_unitless, '-', lw=1.5, color='blue')
-    energy_loss_plot, = ax2.plot([], [], 'o', lw=3, color='purple', label='Total Energy')
-    kinetic_plot, = ax3.plot([], [], 'o', lw=3, color='red', label='Kinetic Energy')
-    potential_plot, = ax3.plot([], [], 'o', lw=3, color='blue', label='Potential Energy')
-    ax2.grid()
-    ax2.legend()
-    ax3.grid()
+    ax3.axhline(y=1, xmin=t_eval[0], xmax=t_eval[-1], linestyle='-', color='black')
+    ax3.plot(t_eval, kinetic_unitless, '-', lw=1.5, color='red', label='Kinetic Energy')
+    ax3.plot(t_eval, potential_unitless, '-', lw=1.5, color='blue', label='Potential Energy')
+    kinetic_plot, = ax3.plot([], [], 'o', lw=3, color='red')
+    potential_plot, = ax3.plot([], [], 'o', lw=3, color='blue')
     ax3.legend()
+    ax3.grid()
+
+    ax2.axhline(y=0, xmin=t_eval[0], xmax=t_eval[-1], linestyle='-', color='black')
+    ax2.plot(t_eval, energy_loss_percent, '-', lw=1.5, color='purple', label='Total Energy')
+    ax2.plot(t_eval, energy_loss_fit_plot, linestyle='--', color='black', label=rf'$r^2={energy_loss_fit.rvalue:.4f},$ $p={energy_loss_fit.pvalue:.4f}$')
+    energy_loss_plot, = ax2.plot([], [], 'o', lw=3, color='purple')
+    ax2.legend()
+    ax2.grid()
 
     spring01, = ax1.plot([], [], '--', lw=2, color='black')
     spring02, = ax1.plot([], [], '--', lw=2, color='black')
@@ -256,15 +260,15 @@ def simulate(
     spring19, = ax1.plot([], [], '--', lw=2, color='black')
     spring20, = ax1.plot([], [], '--', lw=2, color='black')
 
-    mass1, = ax1.plot([], [], 'o', lw=4, color='blue')
-    mass2, = ax1.plot([], [], 'o', lw=4, color='blue')
-    mass3, = ax1.plot([], [], 'o', lw=4, color='blue')
-    mass4, = ax1.plot([], [], 'o', lw=4, color='blue')
-    mass5, = ax1.plot([], [], 'o', lw=4, color='blue')
-    mass6, = ax1.plot([], [], 'o', lw=4, color='blue')
-    mass7, = ax1.plot([], [], 'o', lw=4, color='blue')
-    mass8, = ax1.plot([], [], 'o', lw=4, color='blue')
-    mass9, = ax1.plot([], [], 'o', lw=4, color='blue')
+    mass1, = ax1.plot([], [], 'o', lw=6, color='blue')
+    mass2, = ax1.plot([], [], 'o', lw=6, color='blue')
+    mass3, = ax1.plot([], [], 'o', lw=6, color='blue')
+    mass4, = ax1.plot([], [], 'o', lw=6, color='blue')
+    mass5, = ax1.plot([], [], 'o', lw=6, color='blue')
+    mass6, = ax1.plot([], [], 'o', lw=6, color='blue')
+    mass7, = ax1.plot([], [], 'o', lw=6, color='blue')
+    mass8, = ax1.plot([], [], 'o', lw=6, color='blue')
+    mass9, = ax1.plot([], [], 'o', lw=6, color='blue')
 
     def animate(i):
         mass1.set_data([x[0][i]], [y[0][i]])
@@ -331,11 +335,10 @@ def simulate(
         )
     plt.close()
     if verbose: print('Simulation Complete!')
-    # print()
     return None
 
 def main(
-        tf=10, 
+        tf=15, 
         fps=60, 
         ics=DEFAULT_ICS, 
         params=DEFAULT_PARAMS,
@@ -353,5 +356,5 @@ def multi_run(runs):
 
 
 if __name__ == "__main__":
+    multi_run(3)
     # main()
-    multi_run(9)
